@@ -28,6 +28,12 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 STARTUP_TIMEOUT=60
 STABILITY_WINDOW=30
 
+# Notification settings
+NOTIFY_SLACK_USER="${MOLT_NOTIFY_SLACK_USER:-U08117AJG2U}"  # Corey's Slack ID
+NOTIFY_ON_SUCCESS="${MOLT_NOTIFY_ON_SUCCESS:-true}"
+NOTIFY_ON_FAILURE="${MOLT_NOTIFY_ON_FAILURE:-true}"
+NOTIFY_ON_NO_CHANGE="${MOLT_NOTIFY_ON_NO_CHANGE:-false}"
+
 # === Parse args ===
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -47,6 +53,35 @@ log() {
 die() {
     log "ERROR: $*"
     exit 1
+}
+
+# Send Slack DM notification
+notify_slack() {
+    local status="$1"
+    local message="$2"
+
+    if [[ -z "$NOTIFY_SLACK_USER" ]]; then
+        log "No Slack user configured for notifications"
+        return
+    fi
+
+    # Skip based on status and config
+    if [[ "$status" == "success" && "$NOTIFY_ON_SUCCESS" != "true" ]]; then
+        return
+    fi
+    if [[ "$status" == "failure" && "$NOTIFY_ON_FAILURE" != "true" ]]; then
+        return
+    fi
+    if [[ "$status" == "no_change" && "$NOTIFY_ON_NO_CHANGE" != "true" ]]; then
+        return
+    fi
+
+    log "Sending Slack notification to $NOTIFY_SLACK_USER..."
+    cd "$CLAWDBOT_DIR"
+    node dist/entry.js message send \
+        --channel slack \
+        --target "$NOTIFY_SLACK_USER" \
+        --message "$message" 2>&1 || log "Warning: Failed to send Slack notification"
 }
 
 # Rollback function - returns repo to pre-update state
@@ -144,6 +179,7 @@ No changes - already up to date.
 Current version: ${CURRENT_HEAD:0:8}
 EOF
 
+    notify_slack "no_change" "🦞 Molt check complete - already up to date (${CURRENT_HEAD:0:8})"
     exit 0
 fi
 
@@ -321,6 +357,15 @@ The nightly update failed, but rollback succeeded. I'm running on the old versio
 AGENT_PROMPT
 )"
 
+        # Notify about rollback
+        notify_slack "failure" "⚠️ Molt update failed - rolled back
+
+Attempted: ${CURRENT_HEAD:0:8} → ${NEW_HEAD:0:8}
+Reason: Gateway didn't come up after update
+
+Rolled back to ${CURRENT_HEAD:0:8}. Recovery agent triggered.
+See ~/.clawdbot/molt/crash-log.txt for details."
+
         exit 1  # Exit with error so cron knows it failed
     else
         log "CRITICAL: Rollback also failed!"
@@ -353,6 +398,14 @@ The gateway failed to start after update. Common causes:
 - Syntax error in new code (check for "SyntaxError" in logs)
 - Config incompatibility (check for "Invalid config" in logs)
 EOF
+
+        # Critical failure notification
+        notify_slack "failure" "🚨 CRITICAL: Molt update AND rollback both failed!
+
+Attempted: ${CURRENT_HEAD:0:8} → ${NEW_HEAD:0:8}
+
+Manual intervention required.
+See ~/.clawdbot/molt/RECOVERY.md"
 
         die "CRITICAL: Both update and rollback failed. Manual intervention required. See ~/.clawdbot/molt/RECOVERY.md"
     fi
@@ -408,6 +461,15 @@ Update crashed during stability window. Rolled back successfully.
 AGENT_PROMPT
 )"
 
+    # Notify about stability crash rollback
+    notify_slack "failure" "⚠️ Molt update failed - crashed during stability window
+
+Attempted: ${CURRENT_HEAD:0:8} → ${NEW_HEAD:0:8}
+Reason: Gateway crashed during ${STABILITY_WINDOW}s stability check
+
+Rolled back to ${CURRENT_HEAD:0:8}. Recovery agent triggered.
+See ~/.clawdbot/molt/crash-log.txt for details."
+
     exit 1
 fi
 
@@ -445,3 +507,11 @@ echo "FROM: ${CURRENT_HEAD:0:8}"
 echo "TO: ${NEW_HEAD:0:8}"
 echo "COMMITS: $COMMIT_COUNT"
 echo "CHANGELOG: ${WORKSPACE_DIR}/update-changelog.md"
+
+# Send success notification
+notify_slack "success" "🦞 Molt update successful!
+
+Updated: ${CURRENT_HEAD:0:8} → ${NEW_HEAD:0:8}
+Commits: $COMMIT_COUNT
+
+See ~/clawd/update-changelog.md for details."
