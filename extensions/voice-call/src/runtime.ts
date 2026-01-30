@@ -6,8 +6,9 @@ import type { VoiceCallProvider } from "./providers/base.js";
 import { MockProvider } from "./providers/mock.js";
 import { PlivoProvider } from "./providers/plivo.js";
 import { TelnyxProvider } from "./providers/telnyx.js";
+import { PocketTTSProvider } from "./providers/tts-pocket.js";
 import { TwilioProvider } from "./providers/twilio.js";
-import type { TelephonyTtsRuntime } from "./telephony-tts.js";
+import type { TelephonyTtsRuntime, TelephonyTtsProvider } from "./telephony-tts.js";
 import { createTelephonyTtsProvider } from "./telephony-tts.js";
 import { startTunnel, type TunnelResult } from "./tunnel.js";
 import {
@@ -162,7 +163,31 @@ export async function createVoiceCallRuntime(params: {
 
   if (provider.name === "twilio" && config.streaming?.enabled) {
     const twilioProvider = provider as TwilioProvider;
-    if (ttsRuntime?.textToSpeechTelephony) {
+
+    // Try Pocket TTS first if enabled (local CPU-based, low latency)
+    if (config.pocketTts?.enabled) {
+      try {
+        const pocketProvider = new PocketTTSProvider({
+          baseUrl: config.pocketTts.baseUrl,
+          voiceUrl: config.pocketTts.voiceUrl,
+        });
+        const ttsProvider: TelephonyTtsProvider = {
+          synthesizeForTelephony: (text: string) =>
+            pocketProvider.synthesizeForTwilio(text),
+        };
+        twilioProvider.setTTSProvider(ttsProvider);
+        log.info(
+          `[voice-call] Pocket TTS provider configured (${config.pocketTts.baseUrl})`,
+        );
+      } catch (err) {
+        log.warn(
+          `[voice-call] Failed to initialize Pocket TTS: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    } else if (ttsRuntime?.textToSpeechTelephony) {
+      // Fall back to core TTS (OpenAI/ElevenLabs)
       try {
         const ttsProvider = createTelephonyTtsProvider({
           coreConfig,

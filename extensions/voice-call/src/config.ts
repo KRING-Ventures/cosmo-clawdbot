@@ -82,7 +82,7 @@ export const SttConfigSchema = z
   .default({ provider: "openai", model: "whisper-1" });
 export type SttConfig = z.infer<typeof SttConfigSchema>;
 
-export const TtsProviderSchema = z.enum(["openai", "elevenlabs", "edge"]);
+export const TtsProviderSchema = z.enum(["openai", "elevenlabs", "edge", "pocket"]);
 export const TtsModeSchema = z.enum(["final", "all"]);
 export const TtsAutoSchema = z.enum(["off", "always", "inbound", "tagged"]);
 
@@ -158,6 +158,23 @@ export const TtsConfigSchema = z
   .strict()
   .optional();
 export type VoiceCallTtsConfig = z.infer<typeof TtsConfigSchema>;
+
+// -----------------------------------------------------------------------------
+// Pocket TTS Configuration (local CPU-based TTS)
+// -----------------------------------------------------------------------------
+
+export const PocketTtsConfigSchema = z
+  .object({
+    /** Enable Pocket TTS (overrides other TTS providers when true) */
+    enabled: z.boolean().default(false),
+    /** Base URL of the Pocket TTS server */
+    baseUrl: z.string().url().default("http://127.0.0.1:8000"),
+    /** Voice URL for voice cloning (optional, http://, https://, or hf://) */
+    voiceUrl: z.string().optional(),
+  })
+  .strict()
+  .default({ enabled: false, baseUrl: "http://127.0.0.1:8000" });
+export type PocketTtsConfig = z.infer<typeof PocketTtsConfigSchema>;
 
 // -----------------------------------------------------------------------------
 // Webhook Server Configuration
@@ -364,6 +381,9 @@ export const VoiceCallConfigSchema = z
 
   /** TTS override (deep-merges with core messages.tts) */
   tts: TtsConfigSchema,
+
+  /** Pocket TTS configuration (local CPU-based TTS) */
+  pocketTts: PocketTtsConfigSchema,
 
   /** Store path for call logs */
   store: z.string().optional(),

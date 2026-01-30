@@ -99,6 +99,21 @@
       "label": "Media Stream Path",
       "advanced": true
     },
+    "pocketTts.enabled": {
+      "label": "Use Pocket TTS",
+      "help": "Use local Pocket TTS server instead of cloud TTS. Lower latency, runs on CPU.",
+      "advanced": true
+    },
+    "pocketTts.baseUrl": {
+      "label": "Pocket TTS URL",
+      "help": "URL of the Pocket TTS server (default: http://127.0.0.1:8000)",
+      "advanced": true
+    },
+    "pocketTts.voiceUrl": {
+      "label": "Pocket TTS Voice",
+      "help": "Voice URL for cloning (optional, http://, https://, or hf://)",
+      "advanced": true
+    },
     "tts.provider": {
       "label": "TTS Provider Override",
       "help": "Deep-merges with messages.tts (Edge is ignored for calls).",
@@ -385,6 +400,21 @@
             ]
           },
           "model": {
+            "type": "string"
+          }
+        }
+      },
+      "pocketTts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "voiceUrl": {
             "type": "string"
           }
         }
