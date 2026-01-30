@@ -161,12 +161,15 @@ git fetch "$REMOTE" "$BRANCH" --quiet
 # Compare HEAD with remote
 CURRENT_HEAD=$(git rev-parse HEAD)
 REMOTE_HEAD=$(git rev-parse "${REMOTE}/${BRANCH}")
+MERGE_BASE=$(git merge-base HEAD "${REMOTE}/${BRANCH}")
 
 log "Current HEAD: ${CURRENT_HEAD:0:8}"
 log "Remote HEAD:  ${REMOTE_HEAD:0:8}"
+log "Merge base:   ${MERGE_BASE:0:8}"
 
-if [[ "$CURRENT_HEAD" == "$REMOTE_HEAD" ]]; then
-    log "Already up to date"
+# Check if upstream has new commits (merge-base equals remote means we have everything)
+if [[ "$MERGE_BASE" == "$REMOTE_HEAD" ]]; then
+    log "Already up to date (upstream fully incorporated)"
 
     # Write minimal changelog
     cat > "${WORKSPACE_DIR}/update-changelog.md" << EOF
@@ -202,24 +205,35 @@ echo "$CURRENT_HEAD" > "${MOLT_DIR}/pre-update-head"
 cp pnpm-lock.yaml "${MOLT_DIR}/pre-update-lock.yaml" 2>/dev/null || true
 git log --oneline -1 > "${MOLT_DIR}/pre-update-info"
 
-# Count incoming commits
-COMMIT_COUNT=$(git rev-list --count "${CURRENT_HEAD}..${REMOTE_HEAD}")
+# Count incoming commits from upstream
+COMMIT_COUNT=$(git rev-list --count "${MERGE_BASE}..${REMOTE_HEAD}")
 log "Incoming commits: $COMMIT_COUNT"
 
 if $DRY_RUN; then
-    log "[DRY RUN] Would update from ${CURRENT_HEAD:0:8} to ${REMOTE_HEAD:0:8}"
-    log "[DRY RUN] Incoming changes:"
-    git log --oneline "${CURRENT_HEAD}..${REMOTE_HEAD}"
+    log "[DRY RUN] Would rebase onto ${REMOTE_HEAD:0:8}"
+    log "[DRY RUN] Incoming upstream changes:"
+    git log --oneline "${CURRENT_HEAD}..${REMOTE_HEAD}" 2>/dev/null || \
+        git log --oneline "$(git merge-base HEAD ${REMOTE}/${BRANCH})..${REMOTE_HEAD}"
+
+    # Show local commits that will be rebased
+    LOCAL_COMMITS=$(git rev-list --count "${REMOTE}/${BRANCH}..HEAD" 2>/dev/null || echo "0")
+    if [[ "$LOCAL_COMMITS" -gt 0 ]]; then
+        log "[DRY RUN] Local commits to rebase ($LOCAL_COMMITS):"
+        git log --oneline "${REMOTE}/${BRANCH}..HEAD"
+    fi
     exit 0
 fi
 
 # === Phase 1: Update ===
 log "=== Phase 1: Update ==="
 
-# Merge (fast-forward only)
-log "Merging ${REMOTE}/${BRANCH}..."
-if ! git merge "${REMOTE}/${BRANCH}" --ff-only; then
-    die "Merge failed - history has diverged. Manual intervention required."
+# Rebase local commits on top of upstream (handles custom commits like Pocket TTS)
+log "Rebasing onto ${REMOTE}/${BRANCH}..."
+if ! git rebase "${REMOTE}/${BRANCH}"; then
+    log "Rebase conflict detected - aborting and notifying"
+    git rebase --abort 2>/dev/null || true
+    notify_slack "failure" "🔧 Molt update failed: rebase conflict. Manual intervention required at $(hostname)."
+    die "Rebase failed - history has diverged. Manual intervention required."
 fi
 
 NEW_HEAD=$(git rev-parse HEAD)
